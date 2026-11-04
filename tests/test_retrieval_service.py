@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy.dialects import postgresql
 
-from app.services.retrieval_service import retrieve_relevant_chunks
+from app.services.retrieval_service import (
+    MIN_SIMILARITY_SCORE,
+    retrieve_relevant_chunks,
+)
 
 
 class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
@@ -12,6 +15,7 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
         self.db = MagicMock()
         self.query = self.db.query.return_value
         self.query.join.return_value = self.query
+        self.query.filter.return_value = self.query
         self.query.order_by.return_value = self.query
         self.query.limit.return_value = self.query
         self.embedding = [0.1] * 768
@@ -72,6 +76,81 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(results, [])
         self.query.limit.assert_called_once_with(3)
+
+    async def test_similarity_filter_includes_above_and_exact_threshold(self):
+        above_threshold = SimpleNamespace(
+            chunk_id=1,
+            document_id=1,
+            document_title="Above threshold",
+            chunk_index=0,
+            content="Above",
+            source_type="manual",
+            source_reference=None,
+            cosine_distance=1 - (MIN_SIMILARITY_SCORE + 0.1),
+        )
+        exact_threshold = SimpleNamespace(
+            chunk_id=2,
+            document_id=2,
+            document_title="At threshold",
+            chunk_index=0,
+            content="At threshold",
+            source_type="manual",
+            source_reference=None,
+            cosine_distance=1 - MIN_SIMILARITY_SCORE,
+        )
+        below_threshold = SimpleNamespace(
+            chunk_id=3,
+            document_id=3,
+            document_title="Below threshold",
+            chunk_index=0,
+            content="Below",
+            source_type="manual",
+            source_reference=None,
+            cosine_distance=1 - (MIN_SIMILARITY_SCORE - 0.1),
+        )
+
+        self.query.all.return_value = [
+            above_threshold,
+            exact_threshold,
+        ]
+
+        results = await retrieve_relevant_chunks(self.db, "Question")
+
+        self.assertEqual([item["chunk_id"] for item in results], [1, 2])
+        predicate = self.query.filter.call_args.args[0]
+        compiled = predicate.compile(dialect=postgresql.dialect())
+        self.assertIn("<=", str(compiled))
+        self.assertIn(1 - MIN_SIMILARITY_SCORE, compiled.params.values())
+
+    async def test_similarity_filter_excludes_below_threshold_only(self):
+        below_threshold = SimpleNamespace(
+            chunk_id=3,
+            document_id=3,
+            document_title="Below threshold",
+            chunk_index=0,
+            content="Below",
+            source_type="manual",
+            source_reference=None,
+            cosine_distance=1 - (MIN_SIMILARITY_SCORE - 0.01),
+        )
+        self.query.all.return_value = []
+
+        results = await retrieve_relevant_chunks(self.db, "Question")
+
+        self.assertEqual(results, [])
+        predicate = self.query.filter.call_args.args[0]
+        compiled = predicate.compile(dialect=postgresql.dialect())
+        cutoff = next(
+            value
+            for value in compiled.params.values()
+            if isinstance(value, (int, float))
+        )
+        self.assertLess(
+            1 - below_threshold.cosine_distance,
+            MIN_SIMILARITY_SCORE,
+        )
+        self.assertGreater(below_threshold.cosine_distance, cutoff)
+        self.assertEqual(cutoff, 1 - MIN_SIMILARITY_SCORE)
 
     async def test_rejects_empty_question(self):
         for question in ("", " ", "\n\t"):

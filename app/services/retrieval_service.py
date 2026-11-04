@@ -5,6 +5,9 @@ from app.models.knowledge_document import KnowledgeDocument
 from app.services.embedding_service import generate_embedding
 
 
+MIN_SIMILARITY_SCORE = 0.50
+
+
 async def retrieve_relevant_chunks(
     db: Session,
     question: str,
@@ -33,6 +36,7 @@ async def retrieve_relevant_chunks(
             KnowledgeDocument,
             DocumentChunk.document_id == KnowledgeDocument.id,
         )
+        .filter(cosine_distance <= 1 - MIN_SIMILARITY_SCORE)
         .order_by(cosine_distance.asc())
         .limit(top_k)
         .all()

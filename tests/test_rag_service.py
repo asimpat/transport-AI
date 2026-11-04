@@ -1,7 +1,10 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.services.rag_service import ask_transport_question
+from app.services.rag_service import (
+    INSUFFICIENT_INFORMATION_ANSWER,
+    ask_transport_question,
+)
 
 
 class AskTransportQuestionTests(unittest.IsolatedAsyncioTestCase):
@@ -111,16 +114,29 @@ class AskTransportQuestionTests(unittest.IsolatedAsyncioTestCase):
         self.build_context.assert_not_called()
         self.generate.assert_not_awaited()
 
-    async def test_no_retrieved_chunks_generates_with_empty_context(self):
+    async def test_no_retrieved_chunks_returns_deterministic_fallback(self):
         self.retrieve.return_value = []
-        self.build_context.return_value = {"context": "", "sources": []}
 
         result = await ask_transport_question(self.db, self.question)
 
-        self.build_context.assert_called_once_with([])
-        self.generate.assert_awaited_once_with(self.question, "")
+        self.build_context.assert_not_called()
+        self.generate.assert_not_awaited()
+        self.assertEqual(result["question"], self.question)
+        self.assertEqual(result["answer"], INSUFFICIENT_INFORMATION_ANSWER)
         self.assertEqual(result["sources"], [])
         self.assertEqual(result["retrieved_chunks_count"], 0)
+
+    async def test_relevant_chunks_still_call_context_and_generation(self):
+        result = await ask_transport_question(self.db, self.question)
+
+        self.build_context.assert_called_once_with(self.retrieved_chunks)
+        self.generate.assert_awaited_once_with(
+            self.question,
+            "[1] Lafia bus routes\nBuses operate within Lafia.",
+        )
+        self.assertEqual(result["answer"], "Buses operate within Lafia.")
+        self.assertEqual(result["sources"], self.sources)
+        self.assertEqual(result["retrieved_chunks_count"], 2)
 
     async def test_retrieval_failure_is_propagated(self):
         error = RuntimeError("Retrieval failed")
