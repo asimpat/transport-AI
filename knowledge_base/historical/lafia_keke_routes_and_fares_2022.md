@@ -12,10 +12,10 @@ quoting a Lafia tricycle union chairman:
 |---|---:|
 | A.Y. Shafa filling station to Isa Mustapha Agwai Polytechnic | ₦70 |
 | Roundabout to College of Agriculture | ₦80 |
-| Shabu | ₦100 |
-| Sabon-Pegi | ₦130 |
+| Shabu | ₦300 |
+| Sabon-Pegi | ₦200 |
 | Azuba Bashayi | ₦150 |
-| Roundabout to Mararaba, Makurdi Road | ₦70 |
+| Roundabout to Mararaba, Makurdi Road | ₦200 |
 | Akunza | ₦100 |
 | Agwede | ₦150 |
 | Bukan Kwoto | ₦100 |

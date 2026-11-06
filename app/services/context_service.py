@@ -4,8 +4,15 @@ def build_rag_context(retrieved_chunks: list[dict]) -> dict:
 
     for source_number, chunk in enumerate(retrieved_chunks, start=1):
         source_label = f"[{source_number}]"
+        source_reference = chunk["source_reference"] or "Not provided"
         context_parts.append(
-            f"{source_label} {chunk['document_title']}\n{chunk['content']}"
+            f"--- BEGIN RETRIEVED CHUNK {source_label} ---\n"
+            f"Document title: {chunk['document_title']}\n"
+            f"Classification (source_type): {chunk['source_type']}\n"
+            f"Source reference: {source_reference}\n"
+            f"Chunk index: {chunk['chunk_index']}\n"
+            f"Content:\n{chunk['content']}\n"
+            f"--- END RETRIEVED CHUNK {source_label} ---"
         )
         sources.append(
             {

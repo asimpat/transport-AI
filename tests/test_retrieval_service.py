@@ -10,6 +10,24 @@ from app.services.retrieval_service import (
 )
 
 
+def retrieval_row(**fields):
+    row = {
+        "chunk_id": 1,
+        "document_id": 1,
+        "document_title": "Demo document",
+        "chunk_index": 0,
+        "content": "Demo content",
+        "source_type": "manual",
+        "source_reference": None,
+        "cosine_distance": 0.1,
+    }
+    return SimpleNamespace(**(row | fields))
+
+
+def exact_identifier_row(content, **fields):
+    return retrieval_row(**({"content": content, "cosine_distance": 0.1} | fields))
+
+
 class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.db = MagicMock()
@@ -29,7 +47,7 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_successful_retrieval_returns_document_and_chunk_fields(self):
         self.query.all.return_value = [
-            SimpleNamespace(
+            retrieval_row(
                 chunk_id=11,
                 document_id=4,
                 document_title="Lafia bus routes",
@@ -65,6 +83,71 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
         self.db.add.assert_not_called()
         self.db.delete.assert_not_called()
 
+    async def test_exact_identifier_prioritizes_record_over_test_question_mention(self):
+        semantic_test_list = retrieval_row(
+            chunk_id=21,
+            content="1. What is the destination of TEST-KEKE-001?",
+            cosine_distance=0.05,
+        )
+        semantic_other = retrieval_row(
+            chunk_id=22,
+            document_title="Other route",
+            content="Unrelated semantic match.",
+            cosine_distance=0.2,
+        )
+        actual_record = exact_identifier_row(
+            "## TEST-KEKE-001: Demo Stop North to Demo Stop South\n"
+            "- Origin: Demo Stop North\n"
+            "- Intermediate stops: Demo Stop Cedar, Demo Stop Lantern",
+            chunk_id=23,
+            document_title="SIMULATED DATA - Synthetic Keke Routes",
+            source_type="synthetic",
+            source_reference="knowledge_base/synthetic/synthetic_keke_routes.md",
+            cosine_distance=0.4,
+        )
+        test_question = exact_identifier_row(
+            "1. What is the destination of TEST-KEKE-001?",
+            chunk_id=24,
+            cosine_distance=0.1,
+        )
+        self.query.all.side_effect = [
+            [semantic_test_list, semantic_other],
+            [test_question, actual_record],
+        ]
+
+        results = await retrieve_relevant_chunks(
+            self.db,
+            "What is TEST-KEKE-001, and which stops does it use?",
+        )
+
+        self.assertEqual(results[0]["chunk_id"], 23)
+        self.assertIn("Demo Stop Cedar", results[0]["content"])
+        self.assertEqual(results[0]["source_type"], "synthetic")
+        self.assertNotIn("destination of TEST-KEKE-001", results[1]["content"])
+        self.assertEqual(self.query.all.call_count, 2)
+
+    async def test_exact_identifier_search_requires_a_full_identifier_match(self):
+        exact_partial_record = exact_identifier_row(
+            "## TEST-KEKE-0010: A different record",
+            chunk_id=31,
+        )
+        self.query.all.side_effect = [[], [exact_partial_record]]
+
+        results = await retrieve_relevant_chunks(
+            self.db,
+            "Tell me about TEST-KEKE-001",
+        )
+
+        self.assertEqual(results, [])
+
+    async def test_questions_without_identifier_use_normal_semantic_retrieval(self):
+        self.query.all.return_value = [retrieval_row(chunk_id=41)]
+
+        results = await retrieve_relevant_chunks(self.db, "Where do buses operate?")
+
+        self.assertEqual([result["chunk_id"] for result in results], [41])
+        self.query.all.assert_called_once_with()
+
     async def test_top_k_is_used_as_query_limit(self):
         self.query.all.return_value = []
 
@@ -78,7 +161,7 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
         self.query.limit.assert_called_once_with(3)
 
     async def test_similarity_filter_includes_above_and_exact_threshold(self):
-        above_threshold = SimpleNamespace(
+        above_threshold = retrieval_row(
             chunk_id=1,
             document_id=1,
             document_title="Above threshold",
@@ -88,7 +171,7 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
             source_reference=None,
             cosine_distance=1 - (MIN_SIMILARITY_SCORE + 0.1),
         )
-        exact_threshold = SimpleNamespace(
+        exact_threshold = retrieval_row(
             chunk_id=2,
             document_id=2,
             document_title="At threshold",
@@ -98,7 +181,7 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
             source_reference=None,
             cosine_distance=1 - MIN_SIMILARITY_SCORE,
         )
-        below_threshold = SimpleNamespace(
+        below_threshold = retrieval_row(
             chunk_id=3,
             document_id=3,
             document_title="Below threshold",
@@ -117,13 +200,13 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
         results = await retrieve_relevant_chunks(self.db, "Question")
 
         self.assertEqual([item["chunk_id"] for item in results], [1, 2])
-        predicate = self.query.filter.call_args.args[0]
+        predicate = self.query.filter.call_args_list[0].args[0]
         compiled = predicate.compile(dialect=postgresql.dialect())
         self.assertIn("<=", str(compiled))
         self.assertIn(1 - MIN_SIMILARITY_SCORE, compiled.params.values())
 
     async def test_similarity_filter_excludes_below_threshold_only(self):
-        below_threshold = SimpleNamespace(
+        below_threshold = retrieval_row(
             chunk_id=3,
             document_id=3,
             document_title="Below threshold",
@@ -138,7 +221,7 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
         results = await retrieve_relevant_chunks(self.db, "Question")
 
         self.assertEqual(results, [])
-        predicate = self.query.filter.call_args.args[0]
+        predicate = self.query.filter.call_args_list[0].args[0]
         compiled = predicate.compile(dialect=postgresql.dialect())
         cutoff = next(
             value
@@ -175,7 +258,7 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
         self.db.query.assert_not_called()
 
     async def test_orders_by_ascending_cosine_distance(self):
-        near = SimpleNamespace(
+        near = retrieval_row(
             chunk_id=1,
             document_id=1,
             document_title="Near",
@@ -185,7 +268,7 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
             source_reference=None,
             cosine_distance=0.1,
         )
-        far = SimpleNamespace(
+        far = retrieval_row(
             chunk_id=2,
             document_id=2,
             document_title="Far",
@@ -207,7 +290,7 @@ class RetrieveRelevantChunksTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_similarity_score_is_one_minus_cosine_distance(self):
         self.query.all.return_value = [
-            SimpleNamespace(
+            retrieval_row(
                 chunk_id=1,
                 document_id=2,
                 document_title="Source",

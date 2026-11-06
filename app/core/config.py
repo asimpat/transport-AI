@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"
     OLLAMA_CHAT_MODEL: str = "qwen2.5:1.5b"
     OLLAMA_TIMEOUT_SECONDS: float = 60.0
+    OLLAMA_CHAT_TIMEOUT_SECONDS: float = 180.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

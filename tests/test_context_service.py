@@ -37,7 +37,13 @@ class BuildRagContextTests(unittest.TestCase):
 
         self.assertEqual(
             result["context"],
-            "[1] Lafia bus routes\nBuses operate within Lafia.",
+            "--- BEGIN RETRIEVED CHUNK [1] ---\n"
+            "Document title: Lafia bus routes\n"
+            "Classification (source_type): manual\n"
+            "Source reference: transport guide\n"
+            "Chunk index: 0\n"
+            "Content:\nBuses operate within Lafia.\n"
+            "--- END RETRIEVED CHUNK [1] ---",
         )
         self.assertEqual(
             result["sources"],
@@ -59,8 +65,20 @@ class BuildRagContextTests(unittest.TestCase):
 
         self.assertEqual(
             result["context"],
-            "[1] Lafia bus routes\nBuses operate within Lafia.\n\n"
-            "[2] Lafia fares\nFare information is not listed.",
+            "--- BEGIN RETRIEVED CHUNK [1] ---\n"
+            "Document title: Lafia bus routes\n"
+            "Classification (source_type): manual\n"
+            "Source reference: transport guide\n"
+            "Chunk index: 0\n"
+            "Content:\nBuses operate within Lafia.\n"
+            "--- END RETRIEVED CHUNK [1] ---\n\n"
+            "--- BEGIN RETRIEVED CHUNK [2] ---\n"
+            "Document title: Lafia fares\n"
+            "Classification (source_type): official\n"
+            "Source reference: Not provided\n"
+            "Chunk index: 1\n"
+            "Content:\nFare information is not listed.\n"
+            "--- END RETRIEVED CHUNK [2] ---",
         )
         self.assertIn("Lafia bus routes", result["context"])
         self.assertIn("Lafia fares", result["context"])
@@ -70,6 +88,12 @@ class BuildRagContextTests(unittest.TestCase):
             [source["source_label"] for source in result["sources"]],
             ["[1]", "[2]"],
         )
+        self.assertIn("Classification (source_type): manual", result["context"])
+        self.assertIn("Classification (source_type): official", result["context"])
+        self.assertIn("Source reference: transport guide", result["context"])
+        self.assertIn("Source reference: Not provided", result["context"])
+        self.assertIn("Chunk index: 0", result["context"])
+        self.assertIn("Chunk index: 1", result["context"])
 
     def test_similarity_scores_are_preserved(self):
         result = build_rag_context([self.first_chunk, self.second_chunk])

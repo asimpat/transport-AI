@@ -25,6 +25,15 @@ class GenerateAnswerTests(unittest.IsolatedAsyncioTestCase):
         self.mock_async_client = self.async_client_patch.start()
         self.addCleanup(self.async_client_patch.stop)
 
+    def test_system_prompt_enforces_evidence_grounding_rules(self):
+        self.assertIn("exact route and operator", SYSTEM_PROMPT)
+        self.assertIn("Never transfer", SYSTEM_PROMPT)
+        self.assertIn("preserve its dates", SYSTEM_PROMPT)
+        self.assertIn("fictional academic demonstration data", SYSTEM_PROMPT)
+        self.assertIn("Do not claim that information is unavailable when the context provides it", SYSTEM_PROMPT)
+        self.assertIn("absent or ambiguous", SYSTEM_PROMPT)
+        self.assertIn("public transportation information for Lafia", SYSTEM_PROMPT)
+
     async def test_successful_response_returns_assistant_content(self):
         answer = await generate_answer(
             "Where do buses operate?",
@@ -37,7 +46,7 @@ class GenerateAnswerTests(unittest.IsolatedAsyncioTestCase):
         await generate_answer("Where do buses operate?", "Buses operate within Lafia.")
 
         self.mock_async_client.assert_called_once_with(
-            timeout=settings.OLLAMA_TIMEOUT_SECONDS
+            timeout=settings.OLLAMA_CHAT_TIMEOUT_SECONDS
         )
         self.client.post.assert_awaited_once_with(
             f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat",
@@ -55,6 +64,14 @@ class GenerateAnswerTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(settings.OLLAMA_CHAT_MODEL, "qwen2.5:1.5b")
+
+    async def test_chat_timeout_is_separate_from_embedding_timeout(self):
+        self.assertEqual(settings.OLLAMA_CHAT_TIMEOUT_SECONDS, 180.0)
+        self.assertEqual(settings.OLLAMA_TIMEOUT_SECONDS, 60.0)
+
+        await generate_answer("Where do buses operate?", "Buses operate within Lafia.")
+
+        self.mock_async_client.assert_called_once_with(timeout=180.0)
 
     async def test_rejects_empty_question(self):
         for question in ("", " ", "\n\t"):
